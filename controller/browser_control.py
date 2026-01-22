@@ -20,18 +20,32 @@ def move_mouse(points, frame_shape):
   pyautogui.moveTo(screen_x, screen_y, _pause=False)
 
 def click_mouse():
-  """Triggers a single left click."""
   pyautogui.click()
 
 def perform_action(action):
-  """Executes keyboard/mouse commands based on gestures."""
-  if action == "SWIPE_LEFT":
-    pyautogui.hotkey('ctrl', 'shift', 'tab')
-  elif action == "SWIPE_RIGHT":
-    pyautogui.hotkey('ctrl', 'tab')
+  """Executes keyboard commands for Reels/Shorts."""
 
-  # Scrolling
-  elif action == "SWIPE_UP":
-    pyautogui.scroll(500)  # Scroll Up
+  # --- 1. Video Navigation ---
+  if action == "SWIPE_UP":
+    # Swiping UP usually means "pushing" the current video away to see the NEXT one
+    pyautogui.press('down')
   elif action == "SWIPE_DOWN":
-    pyautogui.scroll(-500)  # Scroll Down
+    # Swiping DOWN brings the PREVIOUS video back
+    pyautogui.press('up')
+
+  # --- 2. Interaction ---
+  elif action == "THUMBS_UP":
+    # 'L' is common for Like on YouTube/TikTok
+    pyautogui.press('l')
+
+  elif action == "OPEN_COMMENTS":  # Swipe Right
+    # 'C' often toggles captions or comments depending on platform
+    pyautogui.press('c')
+
+  elif action == "SHARE_VIDEO":  # Swipe Left
+    # 'S' is a guess; varies by platform (sometimes opens Share menu)
+    pyautogui.press('s')
+
+  # --- 3. Playback ---
+  elif action == "PAUSE_VIDEO":  # Fist
+    pyautogui.press('space')

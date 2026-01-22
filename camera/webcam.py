@@ -2,113 +2,132 @@
 
 import cv2
 import time
+import config
 from collections import deque
 from gestures.mappings import process_frame, detector
 from gestures.detect import detect_gestures
-from controller.browser_control import move_mouse, perform_action, click_mouse
-
-# Configuration
-COOLDOWN_TIME = 1.0
-CLICK_COOLDOWN = 0.5
-HISTORY_LEN = 10
+from controller.browser_control import perform_action, click_mouse, move_mouse
+from learning import util
 
 def main():
   cap = cv2.VideoCapture(0)
 
-  # State Variables
-  is_locked = False
+  hud_message = "Ready"
+  hud_color = (100, 100, 100)
+
+  history = deque(maxlen=config.HISTORY_LEN)
+  heatmap = deque(maxlen=config.HEATMAP_LEN)
+
   last_action_time = 0
   last_click_time = 0
-
-  hud_message = "Active"
-  hud_color = (0, 255, 0)
-
-  history = deque(maxlen=HISTORY_LEN)
 
   try:
     prev_time = 0
     fps = 0
-    last_gesture = None
+    gesture = None
 
     while cap.isOpened():
       ret, frame = cap.read()
-      if not ret:
-        break
+      if not ret: break
 
       frame, points, depth = process_frame(frame)
+      h, w, _ = frame.shape
 
+      # FPS
       curr_time = time.time()
       delta = curr_time - prev_time
-      if delta > 1e-6:
-        fps = int(0.9 * fps + 0.1 * (1 / delta))
+      if delta > 1e-6: fps = int(0.9 * fps + 0.1 * (1 / delta))
       prev_time = curr_time
 
+      click_depth_val = 0.0
+
       if points:
+
+        if gesture in ["MOVE", "SCROLL_MODE"]:
+          heatmap.append(points[8])
+
         history.append((points, depth))
-        gesture = detect_gestures(points, depth, list(history))
 
-        # 1. LOCK/UNLOCK
-        if gesture == "FIST" and last_gesture != "FIST":
-          if curr_time - last_action_time > COOLDOWN_TIME:
-            is_locked = not is_locked
+        gesture, click_depth_val = detect_gestures(points, depth, list(history))
+
+        # --- GESTURE MAPPING ---
+
+        # 1. SCROLL / SWIPE ACTIONS
+        if gesture in ["SWIPE_UP", "SWIPE_DOWN", "OPEN_COMMENTS", "SHARE_VIDEO"]:
+          if curr_time - last_action_time > config.COOLDOWN_TIME:
+            perform_action(gesture)
             last_action_time = curr_time
-            hud_message = "SYSTEM LOCKED" if is_locked else "Active"
-            hud_color = (0, 0, 255) if is_locked else (0, 255, 0)
+            hud_message = gesture
+            hud_color = config.COLOR_SCROLL
             history.clear()
+            heatmap.clear()
 
-        if not is_locked:
 
-          # 2. CLICK
-          if gesture == "PUSH_CLICK":
-            if curr_time - last_click_time > CLICK_COOLDOWN:
-              click_mouse()
-              last_click_time = curr_time
-              hud_message = "CLICK!"
-              history.clear()
+        # 2. MODE INDICATORS
+        elif gesture == "SCROLL_MODE":
+          hud_message = "2-Finger Scroll"
+          hud_color = config.COLOR_SCROLL
 
-          # 3. SWIPES
-          elif gesture in ["SWIPE_LEFT", "SWIPE_RIGHT", "SWIPE_UP", "SWIPE_DOWN"]:
-            if curr_time - last_action_time > COOLDOWN_TIME:
-              perform_action(gesture)
-              last_action_time = curr_time
-              hud_message = gesture
-              history.clear()
+        elif gesture == "STANDBY":
+          hud_message = "STANDBY"
+          hud_color = config.COLOR_LOCK
+          history.clear()
+          heatmap.clear()
 
-          # 4. MOVE MOUSE (Only if gesture is explicit MOVE)
-          elif gesture == "MOVE" and curr_time - last_action_time > 0.1:
-            move_mouse(points, frame.shape[:2])
-            hud_message = "Moving"
 
-          # 5. PAUSE (Thumb is out)
-          elif gesture == "PAUSE_CURSOR":
-            hud_message = "Paused (Thumb)"
+        # 3. CLICKS & MOVES
+        elif gesture == "PINCH_CLICK":
+          if curr_time - last_click_time > config.CLICK_COOLDOWN:
+            click_mouse()
+            last_click_time = curr_time
+            hud_message = "CLICK"
+            history.clear()
+            heatmap.clear()
 
-        last_gesture = gesture
+
+        elif gesture == "MOVE":
+          move_mouse(points, frame.shape[:2])
+          hud_message = "Active"
+          hud_color = config.COLOR_ACTIVE
+
+        # 4. MEDIA CONTROLS
+        elif gesture == "PAUSE_VIDEO":
+          if curr_time - last_action_time > config.COOLDOWN_TIME:
+            perform_action(gesture)
+            last_action_time = curr_time
+            hud_message = "PAUSED"
+            hud_color = (0, 0, 255)
+
+        elif gesture == "THUMBS_UP":
+          if curr_time - last_action_time > config.COOLDOWN_TIME:
+            perform_action(gesture)
+            last_action_time = curr_time
+            hud_message = "LIKED!"
+            hud_color = (0, 255, 255)
+
+        else:
+          # If Ring/Pinky detected or undefined state
+          hud_message = "Blocked"
+          hud_color = (100, 100, 100)
 
       else:
         history.clear()
+        hud_message = "No Hand"
+        if len(heatmap) > 0: heatmap.popleft()
 
-      # --- HUD ---
-      cv2.rectangle(frame, (0, 0), (frame.shape[1], 80), (30, 30, 30), -1)
+      # --- DRAW UI ---
+      cv2.rectangle(frame, (0, 0), (w, 70), (30, 30, 30), -1)
+      cv2.putText(frame, hud_message, (30, 45), cv2.FONT_HERSHEY_SIMPLEX, 1, hud_color, 2)
 
-      cv2.putText(frame, f"FPS: {fps}", (frame.shape[1] - 120, 30),
-                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1)
+      if points and gesture != "SCROLL_MODE" and gesture != "STANDBY":
+        util.draw_bar(frame, w - 30, 100, 15, 150, click_depth_val, (0, 255, 255))
 
-      # Show Z-depth for debugging clicks
-      if depth is not None:
-        cv2.putText(frame, f"Z: {depth:.3f}", (frame.shape[1] - 120, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 1)
-
-      cv2.putText(frame, f"STATUS: {hud_message}", (10, 40),
-                  cv2.FONT_HERSHEY_SIMPLEX, 1, hud_color, 2)
-
-      if curr_time - last_action_time < COOLDOWN_TIME:
-        cv2.circle(frame, (10, 70), 8, (0, 0, 255), -1)
+      if config.DEBUG_MODE:
+        for pt in heatmap:
+          cv2.circle(frame, pt, 3, config.COLOR_HEATMAP, -1)
 
       cv2.imshow("Webcam", frame)
-
-      if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+      if cv2.waitKey(1) & 0xFF == ord('q'): break
 
   finally:
     cap.release()
