@@ -37,6 +37,7 @@ def process_frame(frame):
     timestamp = int(time.time() * 1000)
     result = detector.detect_for_video(mp_image, timestamp)
 
+    avg_z = 0
     points = None
 
     if result.hand_landmarks:
@@ -45,7 +46,10 @@ def process_frame(frame):
 
         for lm in result.hand_landmarks[0]:
             cx, cy = int(lm.x * w), int(lm.y * h)
+            avg_z += lm.z
             points.append((cx, cy))
+
+        avg_z /= len(result.hand_landmarks[0])
 
         for x, y in points:
             cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
@@ -56,4 +60,4 @@ def process_frame(frame):
           x2, y2 = points[end_idx]
           cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-    return frame, points
+    return frame, points, avg_z
